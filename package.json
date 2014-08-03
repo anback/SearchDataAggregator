@@ -4,10 +4,7 @@
   "description": "MomondoScraper",
   "main": "app.js",
   "dependencies": {
-    "phantomjs": "1.9.7-5",
-    "nodemailer": "0.6.3",
-    "request" : "2.34.0",
-    "mongodb" : "1.4.3"
+    "mubsub" : "1.0.4"
   },
   "scripts": {
     "test": "node app.js"
