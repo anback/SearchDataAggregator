@@ -1,43 +1,94 @@
 var mubsub = require('mubsub');
 var client = mubsub('mongodb://swalo:84kAanan@ds051658.mongolab.com:51658/swalo');
 
-
-
-
 var addonChannel = client.channel('addons');
-var responseChannel = client.channel('searchdata');
+var searchdatachannel = client.channel('searchdata');
 
 client.on('error', console.error);
 addonChannel.on('error', console.error);
-responseChannel.on('error', console.error);
+searchdatachannel.on('error', console.error);
 
-responseChannel.subscribe('SkyscannerResponse', function (message) {
-    console.log("Aggregating data for SessionKey: " + message.SessionKey);
-    var resss = GetData(message);
-
-    if(resss === undefined)
-        return;
+searchdatachannel.subscribe('NewRes', function (message) {
+    var res = GetData(message);
     
-    resss.forEach(function(item) {
-        console.log("Sending item to mongolab: ")
+    res.forEach(function(item) {
         addonChannel.publish("NewAddon", item);
     });
 });
 
+function GetData(message) {
+    var res = message.Itineraries.map(function(itinerary) {
+        competitorprices = itinerary.prices.filter(function(price) {
+            return price.OTA !== 'Swalo'
+        });
 
+        swaloprices = itinerary.prices.filter(function(price) {
+            return price.OTA === 'Swalo'
+        });
+
+        if(swaloprices.length == 0)
+            return undefined;
+        if(competitorprices.length == 0)
+            return undefined;
+
+        
+        itinerary.SwaloPrice = swaloprices[0].Price;
+        itinerary.BestCompetitorPrice = competitorprices[0].Price;
+
+        console.log(itinerary.BestCompetitorPrice);
+        console.log(itinerary.SwaloPrice);
+        
+        itinerary.Markup = parseFloat(itinerary.BestCompetitorPrice) - parseFloat(itinerary.SwaloPrice);
+
+        console.log("Found swalo booking with possible markup: " + itinerary.Markup);
+
+        if(res.Markup > 10.0)
+            return undefined;
+
+        res.ItineraryMarkup = res.ItineraryMarkup * -1 - 0.1;
+        
+        return itinerary;
+    });
+
+    console.log("Itineraries: " + res.length);
+    res = res.filter(function(item) {
+        return item != undefined;
+    });
+    console.log("SwaloItineraries: " + res.length);
+
+    return res;
+}
+
+/*
 function GetData(res) {
     //Get SwaloRequestId
+
+    var inProgress = res.QuoteRequests.some(function(item) {
+        return item.HasLiveUpdateInProgress;
+    });
+
     var SwaloQuoteRequests = res.QuoteRequests.filter(function (item) {
         return item.AgentId == 'swlo';
     });
 
     if(SwaloQuoteRequests.length == 0)
+    {
+        console.log("No Swalo result");
         return;
+    }
 
 
     var SwaloQuoteRequestId = SwaloQuoteRequests[0].Id;
     console.log("Found Quote RequestId: " + SwaloQuoteRequestId);
     var ress = res;
+
+    var swaloQuotes = res.Quotes.filter(function(quote) {
+        return quote.QuoteRequestId == SwaloQuoteRequestId;
+    });
+
+    console.log("Found " + swaloQuotes.length + " swaloprices");
+    console.log("Found " + res.Itineraries.length + " itineraries");
+
 
     var quotePriceById = {};
 
@@ -91,26 +142,20 @@ function GetData(res) {
             return itinerary.InboundLegId == inboundItineraryLeg.Id;
         })[0];
 
-        itinerary.Duration = itinerary.OutboundItineraryLeg.Duration + 
-            itinerary.InboundItineraryLeg.Duration;
-
         return itinerary;
     });
-
-    console.log("Found Itineraries: " + itineraries.length);
 
     //Clean all undefined itineraries
     itineraries = itineraries.filter(function(item) {
         return item != undefined;
     })
 
-    //Only care about the first 10 itineraries (Skyscanner page 1)
+    //Only care about the first 30 itineraries (Skyscanner page 1)
     
     itineraries = itineraries.sort(function(a,b) {
         return a.BestCompetitorPrice - b.BestCompetitorPrice;
-    }).slice(0,30);
+    }).slice(0,10);
     
-
     if(itineraries.length == 0)
         return;
     
@@ -122,12 +167,6 @@ function GetData(res) {
     searchData.BestCompetitorPrice = itineraries.sort(function(a,b) {
         return a.BestCompetitorPrice - b.BestCompetitorPrice;
     })[0].BestCompetitorPrice;
-
-    //Best Duration On Search
-    searchData.BestDuration = itineraries.sort(function(a,b) {
-        return a.Duration - b.Duration;
-    })[0].Duration;
-    
     
     var swaloItineraries = itineraries.filter(function(item) {
         return item.SwaloPrice != undefined;
@@ -141,11 +180,6 @@ function GetData(res) {
         searchData.BestSwaloPrice = swaloItineraries.sort(function(a,b) {
             return a.SwaloPrice - b.SwaloPrice;
         })[0].SwaloPrice;
-
-        //Best SwaloDuration On Search
-        searchData.BestSwaloDuration = swaloItineraries.sort(function(a,b) {
-            return a.Duration - b.Duration;
-        })[0].Duration;
     }
     
     searchData.Origin = res.Query.OriginPlace;
@@ -172,23 +206,22 @@ function GetData(res) {
         var res = {};
 
         res.EntireSearchBestCompetitorPrice = searchData.BestCompetitorPrice;
-        res.EntireSearchBestDuration = searchData.BestSwaloDuration;
-
         res.EntireSearchBestSwaloPrice = searchData.BestSwaloPrice;
-        res.EntireSearchBestSwaloDuration = searchData.BestSwaloDuration;
 
         res.BestCompetitorPrice = item.BestCompetitorPrice;
-        res.Duration = item.Duration;
         res.SwaloPrice = item.SwaloPrice;
 
         res.SearchMarkup = searchData.BestSwaloPrice - searchData.BestCompetitorPrice;
         res.ItineraryMarkup = item.SwaloPrice - item.BestCompetitorPrice;
 
+        if(item.InboundItineraryLeg == undefined)
+            return undefined;
+
         res.OutboundItineraryLegMarketingCarrierIds = item.OutboundItineraryLeg.MarketingCarrierIds.join(',');
-        res.InboundItineraryLegMarketingMarketingCarrierIdss = item.InboundItineraryLeg.MarketingCarrierIds.join(',');
+        res.InboundItineraryLegMarketingCarrierIds = item.InboundItineraryLeg.MarketingCarrierIds.join(',');
 
         res.OutboundItineraryLegOperatingCarrierIds = item.OutboundItineraryLeg.OperatingCarrierIds.join(',');
-        res.InboundItineraryLegMarketingOperatingCarrierIdss = item.InboundItineraryLeg.OperatingCarrierIds.join(',');
+        res.InboundItineraryLegOperatingCarrierIds = item.InboundItineraryLeg.OperatingCarrierIds.join(',');
 
         res.OutboundItineraryLegStops = item.OutboundItineraryLeg.StopsCount;
         res.InboundItineraryLegStops = item.InboundItineraryLeg.StopsCount;
@@ -211,6 +244,7 @@ function GetData(res) {
         res.ToDate = this.InboundItineraryLegArrivalDateTime;
         res.SearchDate = searchData.SearchDate;
 
+        
         if(res.ItineraryMarkup > 10.0)
             return undefined;
 
@@ -218,17 +252,37 @@ function GetData(res) {
         return res;
     });
 
-    console.log("Res.length");
-    console.log(res.length);
-
     //Clean all undefined ress
     res = res.filter(function(item) {
         return item != undefined;
     });
 
-    console.log("Res.length not undifined");
     console.log(res.length);
 
-    return res;
+    var ress = [];
+    for (var i = res.length - 1; i >= 0; i--)
+    {
+        res[i].AllowedToAddAsAddon = true;
+        for (var j = res.length - 1; j >= 0; j--) 
+            if(j != i)
+            {
+                var istring = res[i].Origin + res[i].Dest + res[i].OutboundItineraryLegDepartureDateTime + res[i].InboundItineraryLegDepartureDateTime;
+                var jstring = res[j].Origin + res[j].Dest + res[j].OutboundItineraryLegDepartureDateTime + res[j].InboundItineraryLegDepartureDateTime;
+                //console.log(istring);
+                //console.log(jstring);
+                
+                if(istring == jstring)
+                {
+                    console.log("They Are The Same!");
+                    res[i].AllowedToAddAsAddon = false;
+                }
+            }
+        if(res[i].AllowedToAddAsAddon == true)
+            ress.push(res[i]);
+    }
+
+    console.log(ress.length);
+    return ress;
 }
+*/
 

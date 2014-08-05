@@ -1,7 +1,7 @@
 {
-  "name": "MomondoScraper",
+  "name": "SearchDataAggregator",
   "version": "0.0.0",
-  "description": "MomondoScraper",
+  "description": "SearchDataAggregator",
   "main": "app.js",
   "dependencies": {
     "mubsub" : "1.0.4"
