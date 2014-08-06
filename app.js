@@ -17,7 +17,10 @@ searchdatachannel.subscribe('NewRes', function (message) {
 });
 
 function GetData(message) {
-    var res = message.Itineraries.map(function(itinerary) {
+    var res = message.Itineraries.map(function(itinerary, index) {
+        
+        itinerary.order = index;
+
         competitorprices = itinerary.prices.filter(function(price) {
             return price.OTA !== 'Swalo'
         });
@@ -28,35 +31,65 @@ function GetData(message) {
 
         if(swaloprices.length == 0)
             return undefined;
-        if(competitorprices.length == 0)
+
+        if(swaloprices[0].Price == undefined)
             return undefined;
 
-        
-        itinerary.SwaloPrice = swaloprices[0].Price;
-        itinerary.BestCompetitorPrice = competitorprices[0].Price;
+        if(competitorprices.length == 0 || competitorprices[0].Price == undefined) //We are the only one
+        {
+            console.log("We are the only one!");
+            itinerary.Markup = -30.0;
+        }
 
-        console.log(itinerary.BestCompetitorPrice);
+        if(itinerary.Origin.length < 1)
+            return undefined
+
+        if(itinerary.OutboundLegDepartureDateTime == undefined)
+            return undefined;
+
+        if(itinerary.InboundLegDepartureDateTime == undefined)
+            return undefined;
+        
+        
+        itinerary.OutboundLegDepartureDateTime += ":00";
+        itinerary.InboundLegDepartureDateTime += ":00"; 
+        
+
+
+        if(itinerary.Markup != -30.0)
+        {
+            itinerary.SwaloPrice = swaloprices[0].Price.replace('.','');
+            itinerary.BestCompetitorPrice = competitorprices[0].Price.replace('.','');
+            itinerary.Markup = parseFloat(itinerary.SwaloPrice) - parseFloat(itinerary.BestCompetitorPrice);
+        }
+
+        console.log("SwaloPrice: ");
         console.log(itinerary.SwaloPrice);
+
+        console.log("BestCompetitorPrice: ");
+        console.log(itinerary.BestCompetitorPrice);
+
+        logItinerary(itinerary);
         
-        itinerary.Markup = parseFloat(itinerary.BestCompetitorPrice) - parseFloat(itinerary.SwaloPrice);
-
-        console.log("Found swalo booking with possible markup: " + itinerary.Markup);
-
-        if(res.Markup > 10.0)
+        if(itinerary.Markup > 8.9)
             return undefined;
+        
+        itinerary.Markup = itinerary.Markup * -1 - 0.1;
 
-        res.ItineraryMarkup = res.ItineraryMarkup * -1 - 0.1;
+        delete itinerary.prices;
         
         return itinerary;
     });
-
-    console.log("Itineraries: " + res.length);
+    
     res = res.filter(function(item) {
         return item != undefined;
     });
-    console.log("SwaloItineraries: " + res.length);
 
     return res;
+}
+
+function logItinerary(itinerary)  {
+    console.log(itinerary.Origin + ' ' + itinerary.Dest + ' ' + itinerary.OutboundLegDepartureDateTime + ' ' + itinerary.InboundLegDepartureDateTime + ' ' + itinerary.CarrierIds + ' ' + itinerary.Markup);
 }
 
 /*
